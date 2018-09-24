@@ -1,0 +1,69 @@
+var AWS = require("aws-sdk");
+var docClient = new AWS.DynamoDB.DocumentClient();
+exports.handler = (event, context, callback) =>
+{
+    var phoneNumber = event.Details.ContactData.CustomerEndpoint.Address;
+    var fName = event.Details.ContactData.Attributes.fName;
+    var lName = event.Details.ContactData.Attributes.lName;
+    var address = event.Details.ContactData.Attributes.address;
+    var pin = event.Details.ContactData.Attributes.pin;
+    var bDay = event.Details.ContactData.Attributes.bDay;
+    var registrationDate = getDateTime();
+    var table = "patientTable";
+    console.log(event);
+    var params = {
+        TableName: table,
+        Item:
+        {
+            "phoneNumber": phoneNumber,
+            "fName": fName,
+            "lName": lName,
+            "bDay": bDay,
+            "address": address,
+            "registrationDate": registrationDate,
+            "pin": pin
+        }
+    };
+    docClient.put(params, function(err, data)
+    {
+        if (err)
+        {
+            console.log(err); // an error occurred
+            context.fail(buildResponse(false, err));
+        }
+        else
+        {
+            console.log("DynamoDB Query Results:" + JSON.stringify(data));
+            callback(null, buildResponse(true, "none"));
+        }
+    });
+};
+
+function getDateTime()
+{
+    var date = new Date();
+    var year = date.getFullYear();
+    var month = date.getMonth() + 1;
+    month = (month < 10 ? "0" : "") + month;
+    var day = date.getDate();
+    day = (day < 10 ? "0" : "") + day;
+    return month + "/" + day + "/" + year;
+}
+
+function buildResponse(isSuccess, errors)
+{
+    if (isSuccess)
+    {
+        return {
+            errors: errors,
+            lambdaResult: "Success"
+        };
+    }
+    else
+    {
+        console.log("Lambda returned error to Connect");
+        return {
+            lambdaResult: "Error"
+        };
+    }
+}

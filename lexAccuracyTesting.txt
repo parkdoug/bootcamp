@@ -1,0 +1,203 @@
+//purpose: Lex accuracy testing for a specific slot value configured with over 2500 entries. 
+//Architecture: Connect->Lex (please say a plan name)-> Connect->Lex (you said planName, is this correct?) -> Connect If no: Please enter plan ID <DTMF> -> Lambda -> Thank you, your accuracy is accuracy. Goodbye. ->Terminate
+var AWS = require("aws-sdk");
+var docClient = new AWS.DynamoDB.DocumentClient();
+
+function updateLexTestResults(time, phoneNumber, result, expected, actual)
+{
+	var table = "lexTestResults";
+    console.log("updateLexTestResults called with: " + time + ", " + phoneNumber + ", " + result + ", " + expected + ", " + actual);
+    var params = {
+        TableName: table,
+        Item:
+        {
+            "timeStamp": time,
+            "phoneNumber": phoneNumber,
+            "result": result,
+            "expected": expected,
+            "actual": actual
+        }
+    };
+    docClient.put(params, function(err, data)
+    {
+        if (err)
+        {
+            console.log("Failed to update " + table + ", error: " + err); // an error occurred
+        }
+        else
+        {
+            console.log("DynamoDB Query Results:" + JSON.stringify(data));
+        }
+    });
+}
+
+exports.handler = (event, context, callback) => 
+{
+	console.log("Lambda function invoked with event: " + JSON.stringify(event));
+	
+	var phoneNumber = event.Details.ContactData.CustomerEndpoint.Address;
+	var expected = event.Details.ContactData.Attributes.expected;
+	var actual = event.Details.ContactData.Attributes.actual;
+	var response = event.Details.ContactData.Attributes.response;
+	var result = "";
+	if (response == "y") result = "pass";
+	else result = "fail";
+	var strDateTime = new Date().toJSON().slice(0,19).replace('T',':');
+		
+    console.log(" updateStats for time: " + strDateTime + ", phoneNumber = " + phoneNumber + ", result: " + result + ", actual: " + actual);
+	
+	if (result == "pass")
+	{
+		updateLexTestResults(strDateTime, phoneNumber, result, actual, actual);
+	}
+	else
+	{
+		//resolve plan name
+		console.log ("Resolving plan name for: " + expected);
+		var paramsQuery = {
+					TableName: 'planNames',
+					KeyConditionExpression: "ID = :varNumber",
+
+					ExpressionAttributeValues: 
+					{
+						":varNumber": expected
+					}
+				};
+
+		docClient.query(paramsQuery, function(err, data) 
+		{
+			if (err) 
+			{
+				console.log(err); // an error occurred
+				context.fail(buildResponse(false));
+			} 
+			else 
+			{
+				console.log("DynamoDB Query Results:" + JSON.stringify(data));
+
+				if (data.Items.length === 1) 
+				{
+					var planName = data.Items[0].planName;
+					updateLexTestResults(strDateTime, phoneNumber, result, planName, actual);
+				}
+				else updateLexTestResults(strDateTime, phoneNumber, result, planName, actual);
+			}		
+		});
+	}
+	
+	//update lexTest aggregate information and return accuracy rate.
+	paramsQuery = {
+				TableName: 'lexTests',
+  				KeyConditionExpression: "phoneNumber = :varNumber",
+
+  				ExpressionAttributeValues: 
+				{
+   					":varNumber": phoneNumber
+  				}
+ 			};
+
+	docClient.query(paramsQuery, function(err, data) 
+	{
+  		if (err) 
+		{
+   			console.log(err); // an error occurred
+   			context.fail(buildResponse(false));
+  		} 
+		else 
+		{
+   			console.log("DynamoDB Query Results:" + JSON.stringify(data));
+
+   			if (data.Items.length === 1) 
+			{
+    		    var passes = data.Items[0].passes;
+				var fails = data.Items[0].fails;
+				
+				var newPasses = passes;
+				var newFails = fails;
+				
+				if (result =="pass") newPasses = parseInt(passes,10) + 1;
+				else newFails = parseInt(fails,10) + 1;
+				
+				var total = (parseInt(newPasses,10) + parseInt(newFails,10));
+				console.log("passes: " + newPasses + ", fails: " + newFails + ", total: " + total);
+				var accuracy = ((parseInt(newPasses,10)/parseInt(total,10))*100);
+				console.log("accuracy: " + accuracy);
+				
+				var paramsUpdate = {
+					//DynamoDB Table Name.
+					TableName: 'lexTests',
+					Key: { "phoneNumber": phoneNumber },
+					ExpressionAttributeValues: { ":var1": newPasses, ":var2": newFails , ":var3": accuracy},
+					UpdateExpression: "SET passes = :var1, fails = :var2, accuracy = :var3"
+					};
+				console.log(paramsUpdate);
+				docClient.update(paramsUpdate, function (err, data) { if (err) console.log("updateStats error: " + err); });
+				callback(null, buildResponse(true, accuracy, total));
+   			} 
+			else 
+			{
+				//insert new value in lexTests 			
+				if (result == "pass") 
+				{ 
+					passes = "1";
+					fails = "0";
+					accuracy = "100%"
+				}
+				else
+				{
+					passes = "0";
+					fails = "1";
+					accuracy = "0%"				
+				}
+				
+				var params = {
+						TableName: "lexTests",
+						Item:
+						{
+							"phoneNumber": phoneNumber,
+							"passes": passes,
+							"fails": fails,
+							"accuracy": accuracy
+						}
+				    };
+					
+				docClient.put(params, function(err, data)
+				{
+					if (err)
+						{
+						console.log(err); // an error occurred
+						context.fail(buildResponse(false, err));
+					}
+					else
+					{
+							console.log("DynamoDB Query Results:" + JSON.stringify(data));
+					}
+				});
+				
+    			callback(null, buildResponse(true, accuracy, "1"));
+   			}
+  		}
+ 	});
+};
+
+
+//This is the function that will be called on a successful callback
+function buildResponse(isSuccess, accuracy, total) {
+    if (isSuccess) {
+        var results = {
+            accuracy: accuracy,
+            total: total,
+            lambdaResult: "Success"
+        };
+        console.log("Lambda's Response to Amazon Connect is: " + JSON.stringify(results));
+        return results;
+    }
+
+    else {
+        console.log("Lambda returned error to Amazon Connect");
+        var resultsfail = {
+            lambdaResult: "Error"
+        };
+        return JSON.stringify(resultsfail);
+    }
+}

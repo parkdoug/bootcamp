@@ -1,0 +1,52 @@
+exports.handler = (event, context, callback) => {
+    // TODO implement
+    console.log(event);
+    callback(null, {
+    "sessionAttributes": {},
+    "dialogAction": {
+        "type": "Delegate",
+        "slots": {
+            "POSTCODE": checkPostCode(event.currentIntent.slots.POSTCODE),
+            "VRN": checkVRN(event.currentIntent.slots.VRN),
+            "DOB": event.currentIntent.slots.DOB
+        }
+     }
+});
+};
+
+var numbersMap = {"zero": 0, "one": 1, "two": 2, "three":3, "four":4, "five":5, "six":6, "seven":7, "eight":8, "nine":9, "ten":10,
+            "eleven":11, "tweleve":12, "thirteen":13, "fourteen":14, "fifteen":15, "sixteen":16, "seventeen":17, "eighteen":18, "nineteen":19,"twenty":2, "thirty":3, "forty":4, "fifty":5, "sixty":6, "seventy":7, "eighty":8, "ninety":9}
+
+function checkVRN(vrn){
+    if (vrn === null) {
+        return null
+    }
+  vrn = vrn.replace(/\./g,"");
+  splitVRN = vrn.split(" ");
+    for (var i = 0, len = splitVRN.length; i < len; i++) {
+        if (numbersMap[splitVRN[i]] > 0) {
+            splitVRN[i] = numbersMap[splitVRN[i]]
+        } else {
+          splitVRN[i] = splitVRN[i].toUpperCase()
+        }
+        
+    }
+   return splitVRN.join("")
+}
+
+function checkPostCode(postcode){
+    if (postcode === null) {
+        return null
+    }
+  postcode = postcode.replace(/\./g,"");
+  splitPC = postcode.split(" ");
+    for (var i = 0, len = splitPC.length; i < len; i++) {
+        if (numbersMap[splitPC[i]] > 0) {
+            splitPC[i] = numbersMap[splitPC[i]]
+        } else {
+          splitPC[i] = splitPC[i].toUpperCase()
+        }
+        
+    }
+   return splitPC.join("")
+}

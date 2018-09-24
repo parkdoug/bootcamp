@@ -1,0 +1,223 @@
+var AWS = require("aws-sdk");
+var docClient = new AWS.DynamoDB.DocumentClient();
+var tableName = "agentStats";
+
+
+function updateAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls)
+{
+	console.log("Update agent stats for OB BEFORE:" + OBCalls);
+	if (isNaN(OBCalls) || OBCalls == "" || OBCalls == "undefined" || OBCalls == "NULL") OBCalls = "0";
+	console.log("Update agent stats for OB:" + OBCalls);
+    var params = {
+        TableName: tableName,
+		Key: { "agentName": agentName },
+		UpdateExpression: "set RTAtimeStamp = :RTAtimeStamp, previousStatus = :previousStatus, currentStatus = :currentStatus, OBCalls = :OBCalls",
+        ExpressionAttributeValues:
+        {
+            ":RTAtimeStamp": RTAtimeStamp,
+            ":previousStatus": previousStatus,
+            ":currentStatus": currentStatus,
+            ":OBCalls": OBCalls
+        }
+    };
+	console.log(params);
+    docClient.update(params, function(err, data) { if (err) console.log(err); });
+}
+
+function insertAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls)
+{
+	console.log("Update agent stats for OB BEFORE:" + OBCalls);
+	if (isNaN(OBCalls) || OBCalls == "" || OBCalls == "undefined" || OBCalls == "NULL") OBCalls = "0";
+	console.log("Update agent stats for OB:" + OBCalls);
+    var params = {
+        TableName: tableName,
+        Item:
+        {
+            "agentName": agentName,
+            "fName": fName,
+            "lName": lName,
+            "RTAtimeStamp": RTAtimeStamp,
+            "previousStatus": previousStatus,
+            "currentStatus": currentStatus,
+            "OBCalls": OBCalls
+        }
+    };
+	console.log(params);
+    docClient.put(params, function(err, data) { if (err) console.log(err); });
+}
+
+exports.handler = (event, context, callback) =>
+{
+    console.log(event);
+    console.log(event.Records[0].kinesis);
+    event.Records.forEach(function(record)
+    {
+    	var OBCalls;
+    	var increment = false;
+    	var params;
+        var kinesisRecord = record.kinesis;
+        const payload = new Buffer(kinesisRecord.data, 'base64').toString('ascii');
+        console.log(payload);
+        var newPayload = JSON.parse(payload);
+        
+		var eventType;
+		var agentt;
+		
+		try 
+		{
+			eventType = newPayload.EventType;
+		}
+		catch (e) 
+		{
+			
+		}
+		try 
+		{
+			agentt = newPayload.agentName;
+		}
+		catch (e) 
+		{
+			
+		}		
+		
+		if (eventType.includes("LOG") || agentt.includes("Isengard"))
+		{
+			console.log("Skipping login/logout events. Can use this to remove entries on logout, if it fits your use case.");
+		}
+        else
+		{
+			var currentStatus = newPayload.CurrentAgentSnapshot.AgentStatus.Name;
+			var agentName = newPayload.CurrentAgentSnapshot.Configuration.Username;
+			var RTAtimeStamp = newPayload.CurrentAgentSnapshot.AgentStatus.StartTimestamp;
+			var fName = newPayload.CurrentAgentSnapshot.Configuration.FirstName;
+			var lName = newPayload.CurrentAgentSnapshot.Configuration.LastName;
+			var previousStatus = "";
+			try
+			{
+				previousStatus = newPayload.PreviousAgentSnapshot.AgentStatus.Name;
+			}
+			catch (e) {}
+			
+			var currentCall = "";
+			var currentCallState = "";
+			try
+			{
+				currentCall = newPayload.CurrentAgentSnapshot.Contacts[0].InitiationMethod;
+				currentCallState = newPayload.CurrentAgentSnapshot.Contacts[0].State;
+				
+				if (!currentCall == "") currentStatus = currentCall;
+				if (currentStatus == "OUTBOUND") currentStatus = "Outbound";
+				if (currentStatus == "INBOUND") currentStatus = "Inbound";
+				if ((currentCall == "OUTBOUND") && (currentCallState == "CONNECTING")) currentStatus = "Dialing Outbound";
+				if ((currentCall == "INBOUND") && (currentCallState == "CONNECTING")) currentStatus = "Incoming Inbound";
+				if (currentCallState == "ENDED") currentStatus = "ACW";
+				if (currentCallState == "MISSED") currentStatus = "Missed Call";
+				
+				console.log("Detected active call for: " + currentCall);
+				var pastCall = "";
+				var pastCallState = "";
+				try
+				{
+					pastCall = newPayload.PreviousAgentSnapshot.Contacts[0].InitiationMethod;
+					pastCallState = newPayload.PreviousAgentSnapshot.Contacts[0].State;
+					if (!pastCall == "") previousStatus = pastCall;
+					if (previousStatus == "OUTBOUND") previousStatus = "Outbound";
+					if (previousStatus == "INBOUND") previousStatus = "Inbound";
+					if ((pastCall == "OUTBOUND") && (pastCallState == "CONNECTING")) previousStatus = "Dialing Outbound";
+					if ((pastCall == "INBOUND") && (pastCallState == "CONNECTING")) previousStatus = "Incoming Inbound";
+					if (pastCallState == "ENDED") previousStatus = "ACW";
+					if (pastCallState == "MISSED") previousStatus = "Missed Call";                
+						
+					console.log("Detected active previous call for: " + pastCall);
+				}
+				catch (e) {}
+				if (currentCall == "OUTBOUND" && currentCallState == "CONNECTED" && pastCallState == "CONNECTING") increment = true;
+				if (increment) console.log("gotta increment the counter now...");
+				params = {
+					TableName: tableName,
+					KeyConditionExpression: "agentName = :varNumber",
+					ExpressionAttributeValues: { ":varNumber": agentName }
+					};
+					
+				console.log(params);
+				docClient.query(params, function(err, data)
+				{
+					if (err) console.log(err);
+					else {
+							console.log("DynamoDB Query Results:" + JSON.stringify(data));
+							if (data.Items.length === 1) { 
+								try { 
+										OBCalls = data.Items[0].OBCalls;
+										console.log("the OBCalls I pulled: " + OBCalls);
+										if (isNaN(OBCalls) || OBCalls == "" || OBCalls == "undefined") OBCalls = "0";
+										if ((isNaN(OBCalls) || OBCalls == ""|| OBCalls == "undefined") && increment) OBCalls = "1";
+
+										if (increment)
+										{
+											var calls = parseInt(OBCalls);
+											var nextCalls = calls + 1;
+											OBCalls = nextCalls.toString();
+											console.log ("updated OBCalls to " + OBCalls);
+										}
+										console.log("Before the update, here is OBCalls: " + OBCalls);
+										updateAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls);
+								}
+								catch (e) { 
+									if (increment) OBCalls = "1";
+									else OBCalls = "0"; 
+									console.log("Couldn't parse OBCalls value from database so using " + OBCalls);
+									updateAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls);
+								}
+							}
+							else 
+							{
+								if (increment) OBCalls = "1";
+								else OBCalls = "0";
+								console.log("Couldn't parse OBCalls value from database so using " + OBCalls);
+								insertAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls);
+							}
+						}
+				});    	
+			
+			}
+			catch (e)
+			{
+				params = {
+					TableName: tableName,
+					KeyConditionExpression: "agentName = :varNumber",
+					ExpressionAttributeValues: { ":varNumber": agentName }
+					};
+
+				console.log(params);
+				docClient.query(params, function(err, data)
+				{
+					if (err) console.log(err);
+					else {
+							console.log("DynamoDB Query Results:" + JSON.stringify(data));
+							if (data.Items.length === 1) { 
+								try { 
+										OBCalls = data.Items[0].OBCalls; 
+										console.log("the OBCalls I pulled: " + OBCalls);
+										if (isNaN(OBCalls) || OBCalls == "" || OBCalls == "undefined") OBCalls = "0";
+										console.log("the OBCalls I updated it to: " + OBCalls);
+										updateAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls);
+								}
+								catch (e) { 
+									OBCalls = "0"; 
+									console.log("Couldn't parse OBCalls value from database  due to catch so using " + OBCalls);
+									updateAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls);
+								}
+							}
+							else 
+							{
+								OBCalls = "0";
+								console.log("Couldn't parse OBCalls value from database because it wasn't in Dynamo, so using " + OBCalls);
+								insertAgentStats(agentName, fName, lName, RTAtimeStamp, previousStatus, currentStatus, OBCalls);
+							}
+						}
+				});  
+			}
+		}
+    });
+	
+};

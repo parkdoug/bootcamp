@@ -1,0 +1,224 @@
+'use strict';
+var AWS = require("aws-sdk");
+var docClient = new AWS.DynamoDB.DocumentClient();
+//For storing transcript of the call
+const appendTranscript = (outputSessionAttributes, source, message, phoneNumber) =>
+{
+    if (source !== 'Lex' && source !== 'Customer')
+    {
+        throw Error('Invalid Source: ', source);
+    }
+    var custPhoneNumber = "Lex";
+    if (source == 'Customer')
+    {
+        custPhoneNumber = phoneNumber;
+        console.log("custPhoneNumber: " + custPhoneNumber);
+    }
+    if (source == 'Lex')
+    {
+        custPhoneNumber = source;
+        console.log("custPhoneNumber: " + custPhoneNumber);
+    }
+    var transcript = [];
+    if (outputSessionAttributes.transcript !== undefined)
+    {
+        transcript = JSON.parse(outputSessionAttributes.transcript);
+    }
+    transcript.push(
+    {
+        "Participant": source,
+        "Text": message,
+        "Timestamp": new Date().toISOString(),
+        "PhoneNumber": custPhoneNumber
+    });
+    outputSessionAttributes.transcript = JSON.stringify(transcript);
+};
+//skeletal requirements for lambda validation code hook for lex
+function elicitSlot(sessionAttributes, intentName, slots, slotToElicit, message)
+{
+    console.log("Got to Elicit Slot Function");
+    console.log("elicitSlot SessionAttributes: " + JSON.stringify(sessionAttributes));
+    console.log("elicitSlot IntentName: " + JSON.stringify(intentName));
+    console.log("elicitSlot Slots: " + JSON.stringify(slots));
+    console.log("elicitSlot Slot to Elicit: " + JSON.stringify(slotToElicit));
+    console.log("elicitSlot Message: " + JSON.stringify(message));
+    // add to transcript 
+    appendTranscript(sessionAttributes, 'Lex', message.content);
+    return {
+        sessionAttributes,
+        dialogAction:
+        {
+            type: 'ElicitSlot',
+            intentName,
+            slots,
+            slotToElicit,
+            message,
+        }
+    };
+}
+
+function confirmIntent(sessionAttributes, intentName, slots, message)
+{
+    // add to transcript 
+    appendTranscript(sessionAttributes, 'Lex', message.content);
+    return {
+        sessionAttributes,
+        dialogAction:
+        {
+            type: 'ConfirmIntent',
+            intentName,
+            slots,
+            message,
+        }
+    };
+}
+
+function close(sessionAttributes, fulfillmentState, message)
+{
+    // add to transcript 
+    appendTranscript(sessionAttributes, 'Lex', message.content);
+    return {
+        sessionAttributes,
+        dialogAction:
+        {
+            type: 'Close',
+            fulfillmentState,
+            message,
+        },
+    };
+}
+
+function delegate(sessionAttributes, slots)
+{
+    return {
+        sessionAttributes,
+        dialogAction:
+        {
+            type: 'Delegate',
+            slots,
+        },
+    };
+}
+
+function delegate(sessionAttributes, slots)
+{
+    return {
+        sessionAttributes,
+        dialogAction:
+        {
+            type: 'Delegate',
+            slots,
+        },
+    };
+}
+
+//Main method for handling intents.
+// --------------- Intents -----------------------
+/**
+ * Called when the user specifies an intent for this skill.
+ */
+function dispatch(intentRequest, callback, context)
+{
+    var attributes = intentRequest.sessionAttributes;
+    console.log("Attributes: " + JSON.stringify(attributes));
+    var zorkAction = intentRequest.currentIntent.slots.zorkAction;
+    var zorkTarget = intentRequest.currentIntent.slots.zorkTarget;
+    console.log("Action: " + zorkAction + ", target: " + zorkTarget);
+    var firstRun = intentRequest.sessionAttributes.firstRun;
+    console.log("firstRun: " + firstRun)
+    var phoneNumber = "";
+    try
+    {
+        if (intentRequest.sessionAttributes.phoneNumber.includes("+")) phoneNumber = intentRequest.sessionAttributes.phoneNumber.replace('+', '');
+        else phoneNumber = intentRequest.sessionAttributes.phoneNumber;
+    }
+    catch (e) 
+    { 
+        console.log("Issues parsing phoneNumber: " + intentRequest.sessionAttributes.phoneNumber);
+        phoneNumber = intentRequest.sessionAttributes.phoneNumber; 
+    }
+    
+    attributes.sessionId = phoneNumber;
+    const intentName = intentRequest.currentIntent.name;
+    // Dispatch to your skill's intent handlers. Make sure all variables and names referenced back to lex match exactly as everything is case sensitive.
+    if (intentName === 'zorkInput')
+    {
+        if ((!zorkAction || zorkAction === "")&&(!zorkTarget || zorkTarget === "")) 
+        {
+            callback(elicitSlot(attributes, intentRequest.currentIntent.name, intentRequest.currentIntent.slots, 'zorkActionDetails',
+            {
+                contentType: 'PlainText',
+                content: ''
+            }));
+            return;
+        }
+        else
+        {
+            
+            var output = zorkAction + " " + zorkTarget;
+            output = output.replace("null","").trim();
+            console.log("Processing zork action: " + output);
+            attributes.intentUtterance = intentRequest.inputTranscript;
+            var key2 = phoneNumber + "-input.txt";
+            var s32 = new AWS.S3();
+            var params2 = {
+                Bucket: "zorkInput",
+                Key: key2,
+                Body: output
+            };
+            console.log("params:" + JSON.stringify(params2));
+            s32.putObject(params2, function(err, data)
+            {
+                if (err) console.log(err, err.stack); // an error occurred
+                else
+                {
+                    console.log("input file created.");
+                }
+            });
+            console.log("this is the phone number: " + phoneNumber);
+            if (firstRun === "True")
+            {
+                //create init file for application to pick up on
+                var s3 = new AWS.S3();
+                var key = "newSession.txt";
+                phoneNumber = phoneNumber.replace('+', '');
+                var params = {
+                    Bucket: "zorknewsession",
+                    Key: key,
+                    Body: phoneNumber
+                };
+                var sessionId = phoneNumber;
+                console.log("Creating session file for: " + sessionId + " with attributes: " + JSON.stringify(params));
+                s3.putObject(params, function(err, data)
+                {
+                    if (err) console.log(err, err.stack); // an error occurred
+                    else
+                    {
+                        console.log("init file created.");
+                    }
+                });
+            }
+            callback(close(attributes, 'Fulfilled', { contentType: 'PlainText', content: `` }));
+        }
+    }
+    else throw new Error(`Intent with name ${intentName} not supported`);
+}
+// --------------- Main handler -----------------------
+// Route the incoming request based on intent.
+// The JSON body of the request is provided in the event slot.
+exports.handler = (event, context, callback) =>
+{
+    try
+    {
+        console.log(`event.bot.name=${event.bot.name}`);
+        if (event.bot.name !== 'zork')
+        {
+            callback('Invalid Bot Name');
+        }
+        dispatch(event, (response) => callback(null, response));
+    }
+    catch (err)
+    {
+        callback(err);
+    }
+};

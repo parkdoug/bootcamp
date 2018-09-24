@@ -1,0 +1,17 @@
+exports.handler = (event, context, callback) => {
+  var AWS = require('aws-sdk');
+  var lambda = new AWS.Lambda();
+  var params = {
+      
+  Action: "lambda:InvokeFunction", 
+  FunctionName: "selectCTI", 
+  Principal: "connect.amazonaws.com", 
+  SourceAccount: "553531949935", 
+  StatementId: "4"
+};
+lambda.addPermission(params, function(err, data) {
+   if (err) console.log(err, err.stack); // an error occurred
+   else     console.log(data);           // successful response
+});
+};
+ 

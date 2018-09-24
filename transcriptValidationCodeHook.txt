@@ -1,0 +1,139 @@
+function elicitSlot(sessionAttributes, intentName, slots, slotToElicit, message) {
+    console.log("Got to Elicit Slot Function");
+    console.log("elicitSlot SessionAttributes: " +JSON.stringify(sessionAttributes));
+    console.log("elicitSlot IntentName: " +JSON.stringify(intentName));
+    console.log("elicitSlot Slots: " +JSON.stringify(slots));
+    console.log("elicitSlot Slot to Elicit: " +JSON.stringify(slotToElicit));
+    console.log("elicitSlot Message: " +JSON.stringify(message));
+    
+    // add to transcript 
+    appendTranscript(sessionAttributes, 'Lex', message.content);
+    
+    return {
+        sessionAttributes,
+        dialogAction: {
+            type: 'ElicitSlot',
+            intentName,
+            slots,
+            slotToElicit,
+            message,
+        
+        },
+    };
+}
+
+const appendTranscript = (outputSessionAttributes, source, message, phoneNumber) => {    
+    if (source !== 'Lex' && source !== 'Customer') {
+        throw Error('Invalid Source: ', source);
+    }
+    
+    var custPhoneNumber = "Lex";
+    if (source == 'Customer'){
+        custPhoneNumber = phoneNumber;
+        console.log("custPhoneNumber: " + custPhoneNumber);
+    }
+    
+    if (source == 'Lex'){
+        custPhoneNumber = source;
+        console.log("custPhoneNumber: " + custPhoneNumber);
+    }
+    
+    var transcript = [];
+    if (outputSessionAttributes.transcript !== undefined) {
+        transcript = JSON.parse(outputSessionAttributes.transcript);
+    }
+
+    transcript.push(
+        {
+         "Participant": source, 
+         "Text": message, 
+         "Timestamp": new Date().toISOString(),
+         "PhoneNumber": custPhoneNumber
+        });
+    
+    outputSessionAttributes.transcript = JSON.stringify(transcript);  
+};
+
+function confirmIntent(sessionAttributes, intentName, slots, message) {
+    // add to transcript 
+    appendTranscript(sessionAttributes, 'Lex', message.content);
+    
+    return {
+        sessionAttributes,
+        dialogAction: {
+            type: 'ConfirmIntent',
+            intentName,
+            slots,
+            message,
+        },
+    };
+}
+
+function close(sessionAttributes, fulfillmentState, message) {
+    // add to transcript 
+    appendTranscript(sessionAttributes, 'Lex', message.content);
+    
+    return {
+        sessionAttributes,
+        dialogAction: {
+            type: 'Close',
+            fulfillmentState,
+            message,
+        },
+    };
+}
+
+function delegate(sessionAttributes, slots) {
+    return {
+        sessionAttributes,
+        dialogAction: {
+            type: 'Delegate',
+            slots,
+        },
+    };
+}
+ 
+ function delegate(sessionAttributes, slots) {
+    return {
+        sessionAttributes,
+        dialogAction: {
+            type: 'Delegate',
+            slots,
+        },
+    };
+}
+
+function loggingCallback(response, originalCallback) {
+    console.log(JSON.stringify(response, null, 2));
+    originalCallback(null, response);
+}
+
+exports.handler = (event, context, callback) => {
+    console.log("incoming event details: " + JSON.stringify(event));
+    try {
+
+        console.log("incoming event details: " + JSON.stringify(event));
+
+        //Send the request to the dispatch function
+        dispatch(event, (response) => loggingCallback(response, callback));
+    } catch (err) {
+        callback(err);
+    }
+};
+
+function dispatch(intentRequest, callback) {
+        return recordTranscript(intentRequest, callback);
+}
+
+
+
+function recordTranscript(intentRequest, callback) {
+		const outputSessionAttributes = intentRequest.sessionAttributes;
+		const phoneNumber = intentRequest.sessionAttributes.phoneNumber;
+		appendTranscript(outputSessionAttributes, 'Customer', intentRequest.inputTranscript, phoneNumber);
+        callback(delegate(outputSessionAttributes, slots));
+        return;
+}
+
+        
+        

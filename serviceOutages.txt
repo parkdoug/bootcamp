@@ -1,0 +1,185 @@
+var AWS = require("aws-sdk");
+var docClient = new AWS.DynamoDB.DocumentClient();
+
+exports.handler = (event, context, callback) => 
+{
+     var services = "";
+     var problemServices = "";
+     var phoneNumber = event.Details.ContactData.CustomerEndpoint.Address;
+     var paramsQuery = {
+                            TableName: 'customerTable',
+                            KeyConditionExpression: "phoneNumber = :varNumber",
+                            IndexName: "phoneNumber-index",
+
+                            ExpressionAttributeValues: 
+                            {
+                                ":varNumber": phoneNumber
+                            }
+                        };
+
+     docClient.query(paramsQuery, function(err, data) 
+     {
+           if (err) 
+           {
+                console.log(err); // an error occurred
+                context.fail(buildResponse(false));
+           } 
+           else 
+           {
+                console.log("DynamoDB Query Results:" + JSON.stringify(data));
+
+                if (data.Items.length === 1) 
+                {
+					console.log(data.Items[0].name);
+					var name = data.Items[0].name;
+					var serviceIds = data.Items[0].serviceIds;
+					
+					     if servcieIds.Contains(',')
+						 {
+							   var serviceArray = JSON.parse(serviceIds);
+
+							   for (var i = 0, len = serviceArray.length; i < len; i++) 
+							   {
+									var serviceID = serviceArray[i];
+									var paramsQuery2 = {
+                                                            TableName: 'serviceTable',
+                                                            KeyConditionExpression: "serviceId = :varNumber",
+                                                            IndexName: "serviceId-index",
+
+                                                            ExpressionAttributeValues: 
+                                                            {
+                                                                ":varNumber": serviceId
+                                                            }            
+													    };
+
+									docClient.query(paramsQuery2, function(err, data) 
+									{
+										 if (err) 
+										 {
+											   console.log(err); // an error occurred
+											   context.fail(buildResponse(false));
+										 } 
+										 else 
+										 {
+											   console.log("DynamoDB Query Results:" + JSON.stringify(data));
+
+											   if (data.Items.length === 1) 
+											   {
+													console.log(data.Items[0].serviceName);
+													var serviceName = data.Items[0].serviceName;
+
+                                                    if (services === "")
+                                                    {
+                                                        services = serviceName;
+                                                    }
+                                                    else
+                                                    {
+													    services = services + " and " + serviceName;
+                                                    }
+
+													if (data.Items[0].problem === 1)
+													{
+														if (problemServices === “”)
+														{
+															problemServices = serviceName;
+														}
+														else
+														{
+														   problemServices = problemServices + " and " + serviceName;
+														}
+													}
+											   } 
+											   else 
+											   {
+														 console.log("PhoneNumber not found");
+											   }
+                                               
+                                               buildResponse(true, name, services, problemServices);  
+										 }          
+									});
+							   }
+						 }
+						 else
+						 {
+									var serviceID = serviceIds;
+									var paramsQuery2 = {
+																	TableName: 'serviceTable',
+																	KeyConditionExpression: "serviceId = :varNumber",
+																	IndexName: "serviceId-index",
+
+																	ExpressionAttributeValues: 
+																	{
+																		 ":varNumber": serviceId
+																	}            
+														};
+
+									docClient.query(paramsQuery2, function(err, data) 
+									{
+										 if (err) 
+										 {
+											   console.log(err); // an error occurred
+											   context.fail(buildResponse(false));
+										 } 
+										 else 
+										 {
+											   console.log("DynamoDB Query Results:" + JSON.stringify(data));
+
+											   if (data.Items.length === 1) 
+											   {
+													console.log(data.Items[0].serviceName);
+													var serviceName = data.Items[0].serviceName;
+												    if (services === "")
+                                                    {
+                                                        services = serviceName;
+                                                    }
+                                                    else
+                                                    {
+													    services = services + " and " + serviceName;
+                                                    }
+
+													if (data.Items[0].problem === 1)
+													{
+														if (problemServices === “”)
+														{
+															problemServices = serviceName;
+														}
+														 else
+														 {
+															   problemServices = problemServices + " and " + serviceName;
+														 }
+													}
+											   } 
+											   else 
+											   {
+														 console.log("PhoneNumber not found");
+											   }
+
+                                               buildResponse(true, name, services, problemServices);  
+										 }         
+									});
+						 }			
+					};			
+                } 
+                else 
+                {
+                     console.log("PhoneNumber not found");
+                }
+           }
+    });
+
+function buildResponse(isSuccess, name, services, problemServices) 
+{
+    if (isSuccess) 
+     {
+           return { 
+               name: name,
+                services: services,
+                problemServices: problemServices,
+                lambdaResult: "Success"};
+    } 
+     else 
+     {
+           console.log("Lambda returned error to Connect");
+           return { lambdaResult: "Error" };
+    }
+}

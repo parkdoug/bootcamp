@@ -1,0 +1,125 @@
+var AWS = require("aws-sdk");
+var docClient = new AWS.DynamoDB.DocumentClient();
+exports.handler = (event, context, callback) =>
+{
+    var phoneNumber = "1007";
+    var paramsQuery = {
+        TableName: 'Orders',
+        KeyConditionExpression: "OrderNum = :varNumber",
+        ExpressionAttributeValues:
+        {
+            ":varNumber": phoneNumber
+        }
+    };
+    docClient.query(paramsQuery, function(err, data)
+    {
+        if (err)
+        {
+            console.log(err); // an error occurred
+            context.fail(buildResponse(false));
+        }
+        else
+        {
+            console.log("DynamoDB Query Results:" + JSON.stringify(data));
+            var items;
+            var fraudCount = 0;
+            var dateNow = (new Date).getTime();
+            if (data.Items.length === 1)
+            {
+                var itemValues = data.Items[0].items.toString();
+                console.log("The item that was returned is: " + itemValues);
+                if (itemValues.indexOf(',') > -1)
+                {
+                    var itemArray = data.Items[0].items.split(",");
+                    for (var i = 0; i < itemArray.length; i++)
+                    {
+                        console.log(itemArray[i]);
+                        var dateCheck = itemArray[i];
+                        var dateLimit = new Date().setMonth(new Date().getMonth() - 1);
+                        console.log(dateCheck + ">" + dateLimit);
+                        if (dateCheck > dateLimit)
+                        {
+                            console.log("incrementing fraud counter");
+                            fraudCount++;
+                        }
+                    }
+                }
+                items = data.Items[0].items + "," + dateNow;
+                //increment logic here
+                var params = {
+                    TableName: 'Orders',
+                    Item:
+                    {
+                        "OrderNum": phoneNumber,
+                        "items": items,
+                    }
+                };
+                docClient.put(params, function(err, data)
+                {
+                    if (err)
+                    {
+                        console.log(err); // an error occurred
+                        context.fail(buildResponse(false, err));
+                    }
+                    else
+                    {
+                        console.log("DynamoDB Query Results:" + JSON.stringify(data));
+                        callback(null, buildResponse(true, "none"));
+                    }
+                });
+                if (fraudCount > 2)
+                {
+                    console.log("Flagging call request as fraud with fraudCount: " + fraudCount)
+                    callback(null, buildResponse(true, "fail"));
+                }
+                else callback(null, buildResponse(true, "pass"));
+            }
+            else
+            {
+                items = (new Date).getTime();
+                console.log("PhoneNumber not found");
+                //increment logic here
+                params = {
+                    TableName: 'Orders',
+                    Item:
+                    {
+                        "OrderNum": phoneNumber,
+                        "items": items,
+                    }
+                };
+                docClient.put(params, function(err, data)
+                {
+                    if (err)
+                    {
+                        console.log(err); // an error occurred
+                        context.fail(buildResponse(false, err));
+                    }
+                    else
+                    {
+                        console.log("DynamoDB Query Results:" + JSON.stringify(data));
+                        callback(null, buildResponse(true, "none"));
+                    }
+                });
+                callback(null, buildResponse(true, "pass"));
+            }
+        }
+    });
+};
+
+function buildResponse(isSuccess, result)
+{
+    if (isSuccess)
+    {
+        return {
+            result: result,
+            lambdaResult: "Success"
+        };
+    }
+    else
+    {
+        console.log("Lambda returned error to Connect");
+        return {
+            lambdaResult: "Error"
+        };
+    }
+}

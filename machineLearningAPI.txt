@@ -1,0 +1,45 @@
+// If this file contains double-curly-braces, that's because
+// it is a template that has not been processed into JavaScript yet.
+console.log('Loading event');
+exports.handler = function(event, context) {{
+
+
+
+  var AWS = require('aws-sdk');
+  var sns = new AWS.SNS();
+  var ml = new AWS.MachineLearning();
+  var endpointUrl = 'https://realtime.machinelearning.us-east-1.amazonaws.com';
+  var mlModelId = 'ml-5ht9BXWODrP';
+  var customerBlob = event.Details.ContactData.Attributes.Description;
+  
+  
+  
+  
+  var callPredict = function(customerBlob){{
+    console.log('calling predict');
+    ml.predict(
+      {{
+        Record : customerBlob,
+        PredictEndpoint : endpointUrl,
+        MLModelId: mlModelId
+      }},
+      function(err, data) {{
+        if (err) {{
+          console.log(err);
+          context.done(null, 'Call to predict service failed.');
+        }}
+        else {{
+          console.log('Predict call succeeded');
+          if(data.Prediction.predictedLabel === '1'){{
+            
+			return { 
+  		    nextPhone: data.Prediction.predictedLabel,
+   			lambdaResult: "Success"};
+          }}
+          else{{
+			return {lambdaResult: "Failed"};
+          }}
+        }}
+      }}
+      );
+  }}
